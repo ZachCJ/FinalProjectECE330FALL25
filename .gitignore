@@ -1,0 +1,9 @@
+Drivers/*
+FinalProject.ioc
+Middlewares/*
+USB_HOST/*
+STM32F407VGTX_FLASH.ld
+STM32F407VGTX_RAM.ld
+.settings/*
+.project
+.mxproject
