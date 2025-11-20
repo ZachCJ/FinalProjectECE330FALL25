@@ -7,3 +7,4 @@ STM32F407VGTX_RAM.ld
 .settings/*
 .project
 .mxproject
+/Debug/

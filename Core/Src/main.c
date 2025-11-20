@@ -59,7 +59,14 @@ UART_HandleTypeDef huart3;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_RTC_Init(void);
 static void MX_TIM7_Init(void);
+static uint8_t dec_to_bcd(uint8_t x);
+void RTC_Init(void);
+void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday);
+void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec);
+void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec);
+void Systik_Handler(void);
 
 
 /* USER CODE BEGIN PFP */
@@ -91,6 +98,8 @@ char *Message_Pointer;
 char *Save_Pointer;
 int Delay_msec = 0;
 int Delay_counter = 0;
+int alarm;
+int alarm_enabled = 0;
 
 
 /* HELLO ECE-330L */
@@ -132,7 +141,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM7_Init();
-  //MX_RTC_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
   /********************************************************************
@@ -188,6 +197,7 @@ int main(void)
 
   while (1)
   {
+	Seven_Segment(RTC->TR); // test if clock is working, second value should be ticking up
 
     /* USER CODE BEGIN 3 */
   }
@@ -201,17 +211,17 @@ static uint8_t dec_to_bcd(uint8_t x)
 }
 
 /*Initialize the RTC Clock*/
-void RTC_Init(void)
+void MX_RTC_Init(void)
 {
-	PWR->CR |= (1 << 8); // enable real time clock (RTC) register access
+	PWR->CR |= (0b1 << 8); // enable real time clock (RTC) register access
 
-	RCC->BDCR |= (3 << 8); // clear bits 9:8
-	RCC-> BDCR |= (2 << 8); select LSI oscillator clock as 10
+	RCC->BDCR &= ~(0b11 << 8); // clear bits 9:8
+	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
 
-	RCC->BDCR |= RCC_BDCR_RTCEN; // enable RTC
+	RCC->BDCR |= (0b1 << 15); // enable RTC
 
 
-	Seven_Segment(RTC->TR); // test if clock is working, second value should be ticking up
+	//Seven_Segment(RTC->TR); // test if clock is working, second value should be ticking up
 
 	RTC->PRER = 0x102; // set lower portion to 258
 	RTC->PRER |= 0x007F0000; // set upper portion to 127
@@ -219,23 +229,21 @@ void RTC_Init(void)
 	RTC->CR &= ~RTC_CR_FMT; // set to 24-hr clock
 }
 
-/*Sets the date*/
+/*Sets the date off a given date*/
 void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday)
 {
-	RTC->ISR |= RTC_ISR_INIT;
+	RTC->ISR |= RTC_ISR_INIT; //Enter initialization mode
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
-	uint32_t date;
 
-	date |= (dec_to_bcd(year) << 24); // set value for year
-	date |= (dec_to_bcd(month) << 16); // set value for month
-	date |= (dec_to_bcd(day)); // set value for day
-	date |= (dec_to_bcd(weekday) << 8); // set value for weekday
+	RTC->DR |= (dec_to_bcd(year) << 16); // set value for year
+	RTC->DR |= (dec_to_bcd(month) << 8); // set value for month
+	RTC->DR |= (dec_to_bcd(day)); // set value for day
+	RTC->DR |= (dec_to_bcd(weekday) << 13); // set value for weekday
 
-
-	RTC->DR = date;
-
+	RTC->ISR ^= RTC_ISR_INIT; //Exit initialization mode
 }
+
 
 void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec)
 {
@@ -243,18 +251,47 @@ void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec)
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
 
-	uint32_t time = 0;
-	time |= (dec_to_bcd(hour) << 16); // set time for hour
-	time |= (dec_to_bcd(min) << 8); // set time for min
-	time |= (dec_to_bcd(sec)); // set time for sec
+	RTC->TR |= (dec_to_bcd(hour) << 16); // set time for hour
+	RTC->TR |= (dec_to_bcd(min) << 8); // set time for min
+	RTC->TR |= (dec_to_bcd(sec)); // set time for sec
 
-
-	RTC->TR = time;
 	RTC->ISR |= ~RTC_ISR_INIT;
-
 }
 
+void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec)
+{
+	RTC->CR &= ~RTC_CR_ALRAE; // clears ALRAE to disable alarm A
 
+	while (!(RTC->ISR & RTC_ISR_ALRAWF));
+
+//masking for time
+	uint32_t alarm = 0;
+	alarm |= (dec_to_bcd(hour) << 16); // hour
+	alarm |= (dec_to_bcd(min) << 8); // min
+	alarm |= dec_to_bcd(sec); // sec
+
+	RTC->ALRMAR = alarm;
+	Seven_Segment(alarm);
+	HAL_DELAY(500);
+
+	RTC->CR |= (1<< 12); // enable alarm interrupt (ALRAIE)
+	RTC->CR |= (1<< 8); // enable alarm A (ALRAE)
+	RTC->ISR &= ~(1 << 8); // clear alarm A flag
+}
+
+void Systik_Handler(void)
+{
+	//check if alarm A is triggered
+	if(RTC->ISR & (1 << 8)){
+		if(alarm_enabled){
+			Music_ON = 1; // start music
+			INDEX = 0; //reset song if needed
+		}
+		RTC->ISR &= ~(1 << 8); // clear alarm A flag
+	}
+
+	HAL_IncTick(); // keep HAL timing working, increments tick counter
+}
 
 /**
   * @brief System Clock Configuration
@@ -301,11 +338,6 @@ void SystemClock_Config(void)
     Error_Handler();
   }
 }
-
-
-
-
-
 
 static void MX_TIM7_Init(void)
 {
