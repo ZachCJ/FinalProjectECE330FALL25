@@ -61,12 +61,15 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM7_Init(void);
-static uint8_t dec_to_bcd(uint8_t x);
 void RTC_Init(void);
 void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday);
 void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec);
 void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec);
 void Systik_Handler(void);
+uint32_t time_format(uint32_t x);
+uint32_t date_format(uint32_t x, int index);
+extern void Seven_Segment(unsigned int HexValue);
+//extern void HAL_Delay;
 
 
 /* USER CODE BEGIN PFP */
@@ -100,13 +103,13 @@ int Delay_msec = 0;
 int Delay_counter = 0;
 int alarm;
 int alarm_enabled = 0;
-
+int toggleDateTime = 1;
 
 /* HELLO ECE-330L */
 char Message[] =
-		{SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,
+{SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,
 		CHAR_H,CHAR_E,CHAR_L,CHAR_L,CHAR_O,SPACE,CHAR_E,CHAR_C,CHAR_E,DASH,CHAR_3,CHAR_3,CHAR_0,CHAR_L,
-		SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE};
+SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE};
 
 /* Declare array for Song */
 Music Song[100];
@@ -194,20 +197,40 @@ int main(void)
   Delay_msec = 200;
   Animate_On = 0;
 
-
   while (1)
   {
-	Seven_Segment(RTC->TR); // test if clock is working, second value should be ticking up
+	  if(toggleDateTime == 0)
+		  Seven_Segment(time_format(RTC->TR)); // test if clock is working, second value should be ticking up
+	  if(toggleDateTime == 1){
+		  for(int i = 0; i < 8; i++)
+		  {
+			 Seven_Segment(date_format(RTC->DR, i));
+			 if(i == 0)
+				 HAL_Delay(2000);
+			 HAL_Delay(400);
+		  }
+	  }
+
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
 
-/*Convert from decimal to BCD*/
-static uint8_t dec_to_bcd(uint8_t x)
+uint32_t time_format(uint32_t x)
 {
-	return ((x / 10) << 4) | (x % 10);
+	uint32_t temp = x & 0xFF; //Seconds
+	temp |= (x & 0xFF << 8) << 4; //Minutes
+	temp |= (x & 0xFF << 16) << 4; //Hours
+	return temp;
+}
+
+uint32_t date_format(uint32_t x, int index){
+	uint32_t temp = (x & 0x3F) >> index * 4; //Day
+		temp |= ((x & 0x1F << 8) << 4) >> index * 4; //Month
+		temp |= ((x & 0xE0 << 8) << 12) >> index * 4; //Weekday
+		temp |= (((0x20 << 24) + (x & 0xFF << 16)) << 12) >> index * 4; //Year in the form 20XX
+		return temp;
 }
 
 /*Initialize the RTC Clock*/
@@ -219,9 +242,6 @@ void MX_RTC_Init(void)
 	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
 
 	RCC->BDCR |= (0b1 << 15); // enable RTC
-
-
-	//Seven_Segment(RTC->TR); // test if clock is working, second value should be ticking up
 
 	RTC->PRER = 0x102; // set lower portion to 258
 	RTC->PRER |= 0x007F0000; // set upper portion to 127
@@ -236,10 +256,10 @@ void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday)
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
 
-	RTC->DR |= (dec_to_bcd(year) << 16); // set value for year
-	RTC->DR |= (dec_to_bcd(month) << 8); // set value for month
-	RTC->DR |= (dec_to_bcd(day)); // set value for day
-	RTC->DR |= (dec_to_bcd(weekday) << 13); // set value for weekday
+	RTC->DR |= year << 16; // set value for year
+	RTC->DR |= month << 8; // set value for month
+	RTC->DR |= day; // set value for day
+	RTC->DR |= weekday << 13; // set value for weekday
 
 	RTC->ISR ^= RTC_ISR_INIT; //Exit initialization mode
 }
@@ -251,9 +271,9 @@ void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec)
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
 
-	RTC->TR |= (dec_to_bcd(hour) << 16); // set time for hour
-	RTC->TR |= (dec_to_bcd(min) << 8); // set time for min
-	RTC->TR |= (dec_to_bcd(sec)); // set time for sec
+	RTC->TR |= hour << 16; // set time for hour
+	RTC->TR |= min << 8; // set time for min
+	RTC->TR |= sec; // set time for sec
 
 	RTC->ISR |= ~RTC_ISR_INIT;
 }
@@ -266,13 +286,13 @@ void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec)
 
 //masking for time
 	uint32_t alarm = 0;
-	alarm |= (dec_to_bcd(hour) << 16); // hour
-	alarm |= (dec_to_bcd(min) << 8); // min
-	alarm |= dec_to_bcd(sec); // sec
+	alarm |= (hour << 16); // hour
+	alarm |= (min << 8); // min
+	alarm |= sec; // sec
 
 	RTC->ALRMAR = alarm;
 	Seven_Segment(alarm);
-	HAL_DELAY(500);
+	HAL_Delay(500);
 
 	RTC->CR |= (1<< 12); // enable alarm interrupt (ALRAIE)
 	RTC->CR |= (1<< 8); // enable alarm A (ALRAE)
