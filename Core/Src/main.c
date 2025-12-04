@@ -103,7 +103,9 @@ int Delay_msec = 0;
 int Delay_counter = 0;
 int alarm;
 int alarm_enabled = 0;
-int toggleDateTime = 1;
+int toggleDateTime = 0;
+int logTime = 0;
+int i = 0;
 
 /* HELLO ECE-330L */
 char Message[] =
@@ -197,18 +199,26 @@ int main(void)
   Delay_msec = 200;
   Animate_On = 0;
 
+
   while (1)
   {
 	  if(toggleDateTime == 0)
 		  Seven_Segment(time_format(RTC->TR)); // test if clock is working, second value should be ticking up
 	  if(toggleDateTime == 1){
-		  for(int i = 0; i < 8; i++)
-		  {
-			 Seven_Segment(date_format(RTC->DR, i));
-			 if(i == 0)
-				 HAL_Delay(2000);
-			 HAL_Delay(400);
+
+		  Seven_Segment(date_format(RTC->DR, i));
+		  if(logTime < RTC->TR) {
+			  i = (i+1) % 4;
+			  logTime = RTC->TR;
 		  }
+
+
+	  }
+	  if(!(GPIOC->IDR & (1 << 11)))
+	  {
+		  (toggleDateTime == 0) ? (toggleDateTime = 1) : (toggleDateTime = 0); // toggles the bit to display date or time
+		  HAL_Delay(15);
+		  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
 	  }
 
 
@@ -221,7 +231,7 @@ uint32_t time_format(uint32_t x)
 {
 	uint32_t temp = x & 0xFF; //Seconds
 	temp |= (x & 0xFF << 8) << 4; //Minutes
-	temp |= (x & 0xFF << 16) << 4; //Hours
+	temp |= (x & 0xFF << 16) << 8; //Hours
 	return temp;
 }
 
