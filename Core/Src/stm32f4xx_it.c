@@ -186,6 +186,43 @@ void SysTick_Handler(void)
 {
   /* USER CODE BEGIN SysTick_IRQn 0 */
 
+ /* RTC Alarm Logic */
+
+
+COUNT++;  // Increment note duration counter
+Vibrato_Count++; // Increment the note vibrato effect counter
+
+/* This code applies vibrato to the current note that is playing  */
+if (Vibrato_Count >= Vibrato_Rate)
+{
+	Vibrato_Count = 0;
+	if (Song[INDEX].note > 0)
+		{
+			Song[INDEX].note += Vibrato_Depth;
+			if (Song[INDEX].note > (Save_Note + Vibrato_Depth)) Song[INDEX].note = Save_Note - Vibrato_Depth;
+
+		}
+}
+
+if (Animate_On > 0)
+{
+	Delay_counter++;
+	if (Delay_counter > Delay_msec)
+	{
+		Delay_counter = 0;
+		Seven_Segment_Digit(7,*(Message_Pointer),0);
+		Seven_Segment_Digit(6,*(Message_Pointer+1),0);
+		Seven_Segment_Digit(5,*(Message_Pointer+2),0);
+		Seven_Segment_Digit(4,*(Message_Pointer+3),0);
+		Seven_Segment_Digit(3,*(Message_Pointer+4),0);
+		Seven_Segment_Digit(2,*(Message_Pointer+5),0);
+		Seven_Segment_Digit(1,*(Message_Pointer+6),0);
+		Seven_Segment_Digit(0,*(Message_Pointer+7),0);
+		Message_Pointer++;
+		if ((Message_Pointer - Save_Pointer) >= (Message_Length-8)) Message_Pointer = Save_Pointer;
+
+	}
+}
   /* USER CODE END SysTick_IRQn 0 */
   HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */
@@ -207,6 +244,7 @@ void RTC_Alarm_IRQHandler(void)
 {
   /* USER CODE BEGIN RTC_Alarm_IRQn 0 */
 
+
   /* USER CODE END RTC_Alarm_IRQn 0 */
   HAL_RTC_AlarmIRQHandler(&hrtc);
   /* USER CODE BEGIN RTC_Alarm_IRQn 1 */
@@ -221,6 +259,75 @@ void TIM7_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM7_IRQn 0 */
 
+	/* Increment TONE counter and dimming ramp counter */
+	TONE++;
+	ramp++;
+
+	/* This code plays the song from the song array structure */
+	if ((Music_ON > 0) && (Song[INDEX].note > 0) && ((Song[INDEX].tempo/Song[INDEX].size - Song[INDEX].space) > COUNT))
+	{
+
+		if (Song[INDEX].note <= TONE)
+		{
+			GPIOD->ODR ^= 1;
+			TONE = 0;
+		}
+	}
+	else if ((Music_ON > 0) && Song[INDEX].tempo/Song[INDEX].size > COUNT)
+	{
+		TONE = 0;
+	}
+	else if ((Music_ON > 0) && Song[INDEX].tempo/Song[INDEX].size == COUNT)
+	{
+		COUNT = 0;
+		TONE = 0;
+		if (!(Song[INDEX].end))
+				{
+					INDEX++;
+					Save_Note = Song[INDEX].note;
+				}
+		if ((Song[INDEX].end))
+				{
+			  	  	  Save_Note = Song[0].note;  // Needed for vibrato effect
+			  	  	  INDEX = 0;
+			  	  	  Music_ON = 0;
+				}
+	}
+	else if (Music_ON == 0)
+		{
+			TONE = 0;
+			COUNT = 0;
+		}
+
+
+	/* This code dims the RGB LEDs using PWM */
+	if (DIM_Enable > 0)
+	{
+		if (RED_BRT <= ramp)
+		{
+			GPIOD->ODR |= (1 << 15);
+		}
+		else
+		{
+			GPIOD->ODR &= ~(1 << 15);
+		}
+		if (BLUE_BRT <= ramp)
+		{
+			GPIOD->ODR |= (1 << 14);
+		}
+		else
+		{
+			GPIOD->ODR &= ~(1 << 14);
+		}
+		if (GREEN_BRT <= ramp)
+		{
+			GPIOD->ODR |= (1 << 13);
+		}
+		else
+		{
+			GPIOD->ODR &= ~(1 << 13);
+		}
+	}
   /* USER CODE END TIM7_IRQn 0 */
   HAL_TIM_IRQHandler(&htim7);
   /* USER CODE BEGIN TIM7_IRQn 1 */

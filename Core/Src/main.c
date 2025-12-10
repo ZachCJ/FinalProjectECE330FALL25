@@ -2,7 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
-  * @brief          : Main program body
+  * @brief          : Main program body Final Project SP2025
   ******************************************************************************
   * @attention
   *
@@ -18,7 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "usb_host.h"
+#include "seg7.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -59,13 +59,18 @@ UART_HandleTypeDef huart3;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
-static void MX_I2S3_Init(void);
-static void MX_SPI1_Init(void);
-static void MX_TIM7_Init(void);
-static void MX_USART3_UART_Init(void);
 static void MX_RTC_Init(void);
-void MX_USB_HOST_Process(void);
+static void MX_TIM7_Init(void);
+void RTC_Init(void);
+void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday);
+void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec);
+void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec);
+void Systik_Handler(void);
+uint32_t time_format(uint32_t x);
+uint32_t date_format(uint32_t x, int index);
+extern void Seven_Segment(unsigned int HexValue);
+//extern void HAL_Delay;
+
 
 /* USER CODE BEGIN PFP */
 
@@ -73,7 +78,43 @@ void MX_USB_HOST_Process(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+char ramp = 0;
+char RED_BRT = 0;
+char GREEN_BRT = 0;
+char BLUE_BRT = 0;
+char RED_STEP = 1;
+char GREEN_STEP = 2;
+char BLUE_STEP = 3;
+char DIM_Enable = 0;
+char Music_ON = 0;
+int TONE = 0;
+int COUNT = 0;
+int INDEX = 0;
+int Note = 0;
+int Save_Note = 0;
+int Vibrato_Depth = 1;
+int Vibrato_Rate = 40;
+int Vibrato_Count = 0;
+char Animate_On = 0;
+char Message_Length = 0;
+char *Message_Pointer;
+char *Save_Pointer;
+int Delay_msec = 0;
+int Delay_counter = 0;
+int alarm;
+int alarm_enabled = 0;
+int toggleDateTime = 0;
+int logTime = 0;
+int i = 0;
 
+/* HELLO ECE-330L */
+char Message[] =
+{SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,
+		CHAR_H,CHAR_E,CHAR_L,CHAR_L,CHAR_O,SPACE,CHAR_E,CHAR_C,CHAR_E,DASH,CHAR_3,CHAR_3,CHAR_0,CHAR_L,
+SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE};
+
+/* Declare array for Song */
+Music Song[100];
 /* USER CODE END 0 */
 
 /**
@@ -104,27 +145,182 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
-  MX_I2S3_Init();
-  MX_SPI1_Init();
-  MX_USB_HOST_Init();
   MX_TIM7_Init();
-  MX_USART3_UART_Init();
   MX_RTC_Init();
   /* USER CODE BEGIN 2 */
 
+  /********************************************************************
+   * PWR->CR |= ???;  //Enable Real Time Clock (RTC) Register Access  *
+   * RCC->BDCR |= ???;  //Set clock source for RTC                    *
+   * RCC->BDCR |= ???; //Enable RTC									  *
+   ********************************************************************/
+
+  /*** Configure GPIOs ***/
+  GPIOD->MODER = 0x55555555; // set all Port D pins to outputs
+  GPIOA->MODER |= 0x000000FF; // Port A mode register - make A0 to A3 analog pins
+  GPIOE->MODER |= 0x55555555; // Port E mode register - make E0 to E15 outputs
+  GPIOC->MODER |= 0x0; // Port C mode register - all inputs
+  GPIOE->ODR = 0xFFFF; // Set all Port E pins high
+
+  /*** Configure ADC1 ***/
+  RCC->APB2ENR |= 1<<8;  // Turn on ADC1 clock by forcing bit 8 to 1 while keeping other bits unchanged
+  ADC1->SMPR2 |= 1; // 15 clock cycles per sample
+  ADC1->CR2 |= 1;        // Turn on ADC1 by forcing bit 0 to 1 while keeping other bits unchanged
+
+  /*****************************************************************************************************
+  These commands are handled as part of the MX_TIM7_Init() function and don't need to be enabled
+  RCC->AHB1ENR |= 1<<5; // Enable clock for timer 7
+  __enable_irq(); // Enable interrupts
+  NVIC_EnableIRQ(TIM7_IRQn); // Enable Timer 7 Interrupt in the NVIC controller
+  *******************************************************************************************************/
+
+  TIM7->PSC = 199; //250Khz timer clock prescaler value, 250Khz = 50Mhz / 200
+  TIM7->ARR = 1; // Count to 1 then generate interrupt (divide by 2), 125Khz interrupt rate to increment byte counter for 78Hz PWM
+  TIM7->DIER |= 1; // Enable timer 7 interrupt
+  TIM7->CR1 |= 1; // Enable timer counting
+
+  /* Initialize the first index*/
+  Song[0].note = A4;
+  Song[0].size = quarter;
+  Song[0].tempo = 1400;
+  Song[0].space = 10;
+  Song[0].end = 0;
+
+  Save_Note = Song[0].note;  // Needed for vibrato effect
+  INDEX = 0;
+  Music_ON = 0;
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
+  Message_Pointer = &Message[0];
+  Save_Pointer = &Message[0];
+  Message_Length = sizeof(Message)/sizeof(Message[0]);
+  Delay_msec = 200;
+  Animate_On = 0;
+
+
   while (1)
   {
-    /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
+	  if(toggleDateTime == 0)
+		  Seven_Segment(time_format(RTC->TR)); // test if clock is working, second value should be ticking up
+	  if(toggleDateTime == 1){
+
+		  Seven_Segment(date_format(RTC->DR, i));
+		  if(logTime < RTC->TR) {
+			  i = (i+1) % 4;
+			  logTime = RTC->TR;
+		  }
+
+
+	  }
+	  if(!(GPIOC->IDR & (1 << 11)))
+	  {
+		  (toggleDateTime == 0) ? (toggleDateTime = 1) : (toggleDateTime = 0); // toggles the bit to display date or time
+		  HAL_Delay(15);
+		  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
+	  }
+
 
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+uint32_t time_format(uint32_t x)
+{
+	uint32_t temp = x & 0xFF; //Seconds
+	temp |= (x & 0xFF << 8) << 4; //Minutes
+	temp |= (x & 0xFF << 16) << 8; //Hours
+	return temp;
+}
+
+uint32_t date_format(uint32_t x, int index){
+	uint32_t temp = (x & 0x3F) >> index * 4; //Day
+		temp |= ((x & 0x1F << 8) << 4) >> index * 4; //Month
+		temp |= ((x & 0xE0 << 8) << 12) >> index * 4; //Weekday
+		temp |= (((0x20 << 24) + (x & 0xFF << 16)) << 12) >> index * 4; //Year in the form 20XX
+		return temp;
+}
+
+/*Initialize the RTC Clock*/
+void MX_RTC_Init(void)
+{
+	PWR->CR |= (0b1 << 8); // enable real time clock (RTC) register access
+
+	RCC->BDCR &= ~(0b11 << 8); // clear bits 9:8
+	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
+
+	RCC->BDCR |= (0b1 << 15); // enable RTC
+
+	RTC->PRER = 0x102; // set lower portion to 258
+	RTC->PRER |= 0x007F0000; // set upper portion to 127
+
+	RTC->CR &= ~RTC_CR_FMT; // set to 24-hr clock
+}
+
+/*Sets the date off a given date*/
+void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday)
+{
+	RTC->ISR |= RTC_ISR_INIT; //Enter initialization mode
+
+	while (!(RTC->ISR & RTC_ISR_INITF));
+
+	RTC->DR |= year << 16; // set value for year
+	RTC->DR |= month << 8; // set value for month
+	RTC->DR |= day; // set value for day
+	RTC->DR |= weekday << 13; // set value for weekday
+
+	RTC->ISR ^= RTC_ISR_INIT; //Exit initialization mode
+}
+
+
+void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec)
+{
+	RTC->ISR |= RTC_ISR_INIT;
+
+	while (!(RTC->ISR & RTC_ISR_INITF));
+
+	RTC->TR |= hour << 16; // set time for hour
+	RTC->TR |= min << 8; // set time for min
+	RTC->TR |= sec; // set time for sec
+
+	RTC->ISR |= ~RTC_ISR_INIT;
+}
+
+void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec)
+{
+	RTC->CR &= ~RTC_CR_ALRAE; // clears ALRAE to disable alarm A
+
+	while (!(RTC->ISR & RTC_ISR_ALRAWF));
+
+//masking for time
+	uint32_t alarm = 0;
+	alarm |= (hour << 16); // hour
+	alarm |= (min << 8); // min
+	alarm |= sec; // sec
+
+	RTC->ALRMAR = alarm;
+	Seven_Segment(alarm);
+	HAL_Delay(500);
+
+	RTC->CR |= (1<< 12); // enable alarm interrupt (ALRAIE)
+	RTC->CR |= (1<< 8); // enable alarm A (ALRAE)
+	RTC->ISR &= ~(1 << 8); // clear alarm A flag
+}
+
+void Systik_Handler(void)
+{
+	//check if alarm A is triggered
+	if(RTC->ISR & (1 << 8)){
+		if(alarm_enabled){
+			Music_ON = 1; // start music
+			INDEX = 0; //reset song if needed
+		}
+		RTC->ISR &= ~(1 << 8); // clear alarm A flag
+	}
+
+	HAL_IncTick(); // keep HAL timing working, increments tick counter
 }
 
 /**
@@ -173,199 +369,6 @@ void SystemClock_Config(void)
   }
 }
 
-/**
-  * @brief I2C1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2C1_Init(void)
-{
-
-  /* USER CODE BEGIN I2C1_Init 0 */
-
-  /* USER CODE END I2C1_Init 0 */
-
-  /* USER CODE BEGIN I2C1_Init 1 */
-
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2C1_Init 2 */
-
-  /* USER CODE END I2C1_Init 2 */
-
-}
-
-/**
-  * @brief I2S3 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_I2S3_Init(void)
-{
-
-  /* USER CODE BEGIN I2S3_Init 0 */
-
-  /* USER CODE END I2S3_Init 0 */
-
-  /* USER CODE BEGIN I2S3_Init 1 */
-
-  /* USER CODE END I2S3_Init 1 */
-  hi2s3.Instance = SPI3;
-  hi2s3.Init.Mode = I2S_MODE_MASTER_TX;
-  hi2s3.Init.Standard = I2S_STANDARD_PHILIPS;
-  hi2s3.Init.DataFormat = I2S_DATAFORMAT_16B;
-  hi2s3.Init.MCLKOutput = I2S_MCLKOUTPUT_ENABLE;
-  hi2s3.Init.AudioFreq = I2S_AUDIOFREQ_96K;
-  hi2s3.Init.CPOL = I2S_CPOL_LOW;
-  hi2s3.Init.ClockSource = I2S_CLOCK_PLL;
-  hi2s3.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
-  if (HAL_I2S_Init(&hi2s3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN I2S3_Init 2 */
-
-  /* USER CODE END I2S3_Init 2 */
-
-}
-
-/**
-  * @brief RTC Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_RTC_Init(void)
-{
-
-  /* USER CODE BEGIN RTC_Init 0 */
-
-  /* USER CODE END RTC_Init 0 */
-
-  RTC_TimeTypeDef sTime = {0};
-  RTC_DateTypeDef sDate = {0};
-  RTC_AlarmTypeDef sAlarm = {0};
-
-  /* USER CODE BEGIN RTC_Init 1 */
-
-  /* USER CODE END RTC_Init 1 */
-
-  /** Initialize RTC Only
-  */
-  hrtc.Instance = RTC;
-  hrtc.Init.HourFormat = RTC_HOURFORMAT_24;
-  hrtc.Init.AsynchPrediv = 127;
-  hrtc.Init.SynchPrediv = 255;
-  hrtc.Init.OutPut = RTC_OUTPUT_DISABLE;
-  hrtc.Init.OutPutPolarity = RTC_OUTPUT_POLARITY_HIGH;
-  hrtc.Init.OutPutType = RTC_OUTPUT_TYPE_OPENDRAIN;
-  if (HAL_RTC_Init(&hrtc) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /* USER CODE BEGIN Check_RTC_BKUP */
-
-  /* USER CODE END Check_RTC_BKUP */
-
-  /** Initialize RTC and set the Time and Date
-  */
-  sTime.Hours = 0x0;
-  sTime.Minutes = 0x0;
-  sTime.Seconds = 0x0;
-  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_ADD1H;
-  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
-  sDate.Month = RTC_MONTH_JANUARY;
-  sDate.Date = 0x1;
-  sDate.Year = 0x0;
-
-  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-
-  /** Enable the Alarm A
-  */
-  sAlarm.AlarmTime.Hours = 0x0;
-  sAlarm.AlarmTime.Minutes = 0x0;
-  sAlarm.AlarmTime.Seconds = 0x0;
-  sAlarm.AlarmTime.SubSeconds = 0x0;
-  sAlarm.AlarmTime.DayLightSaving = RTC_DAYLIGHTSAVING_ADD1H;
-  sAlarm.AlarmTime.StoreOperation = RTC_STOREOPERATION_RESET;
-  sAlarm.AlarmMask = RTC_ALARMMASK_NONE;
-  sAlarm.AlarmSubSecondMask = RTC_ALARMSUBSECONDMASK_ALL;
-  sAlarm.AlarmDateWeekDaySel = RTC_ALARMDATEWEEKDAYSEL_DATE;
-  sAlarm.AlarmDateWeekDay = 0x1;
-  sAlarm.Alarm = RTC_ALARM_A;
-  if (HAL_RTC_SetAlarm_IT(&hrtc, &sAlarm, RTC_FORMAT_BCD) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN RTC_Init 2 */
-
-  /* USER CODE END RTC_Init 2 */
-
-}
-
-/**
-  * @brief SPI1 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SPI1_Init(void)
-{
-
-  /* USER CODE BEGIN SPI1_Init 0 */
-
-  /* USER CODE END SPI1_Init 0 */
-
-  /* USER CODE BEGIN SPI1_Init 1 */
-
-  /* USER CODE END SPI1_Init 1 */
-  /* SPI1 parameter configuration*/
-  hspi1.Instance = SPI1;
-  hspi1.Init.Mode = SPI_MODE_MASTER;
-  hspi1.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
-  hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
-  hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
-  hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-  hspi1.Init.CRCPolynomial = 10;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SPI1_Init 2 */
-
-  /* USER CODE END SPI1_Init 2 */
-
-}
-
-/**
-  * @brief TIM7 Initialization Function
-  * @param None
-  * @retval None
-  */
 static void MX_TIM7_Init(void)
 {
 
@@ -404,39 +407,7 @@ static void MX_TIM7_Init(void)
   * @param None
   * @retval None
   */
-static void MX_USART3_UART_Init(void)
-{
 
-  /* USER CODE BEGIN USART3_Init 0 */
-
-  /* USER CODE END USART3_Init 0 */
-
-  /* USER CODE BEGIN USART3_Init 1 */
-
-  /* USER CODE END USART3_Init 1 */
-  huart3.Instance = USART3;
-  huart3.Init.BaudRate = 115200;
-  huart3.Init.WordLength = UART_WORDLENGTH_8B;
-  huart3.Init.StopBits = UART_STOPBITS_1;
-  huart3.Init.Parity = UART_PARITY_NONE;
-  huart3.Init.Mode = UART_MODE_TX_RX;
-  huart3.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart3.Init.OverSampling = UART_OVERSAMPLING_16;
-  if (HAL_UART_Init(&huart3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART3_Init 2 */
-
-  /* USER CODE END USART3_Init 2 */
-
-}
-
-/**
-  * @brief GPIO Initialization Function
-  * @param None
-  * @retval None
-  */
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
