@@ -62,14 +62,13 @@ static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
 static void MX_TIM7_Init(void);
 void RTC_Init(void);
-void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday);
-void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec);
-void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec);
+void RTC_Set_Date(uint32_t new_date);
+void RTC_Set_Time(uint32_t new_time);
+void RTC_Set_Alarm(void);
 void Systik_Handler(void);
 uint32_t time_format(uint32_t x);
-uint32_t date_format(uint32_t x, int index);
+void date_message_gen(uint32_t x);
 extern void Seven_Segment(unsigned int HexValue);
-//extern void HAL_Delay;
 
 
 /* USER CODE BEGIN PFP */
@@ -101,20 +100,19 @@ char *Message_Pointer;
 char *Save_Pointer;
 int Delay_msec = 0;
 int Delay_counter = 0;
-int alarm;
+uint32_t alarm;
 int alarm_enabled = 0;
-int toggleDateTime = 0;
-int logTime = 0;
-int i = 0;
+int toggleDateTime = 0;//Default Time Display State
+int toggleMode = 0; //Default Display State
+uint32_t set_time = 0; //Default time
+uint32_t set_date = 0;
+int display_index = 0;
 
 /* HELLO ECE-330L */
-char Message[] =
-{SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,
-		CHAR_H,CHAR_E,CHAR_L,CHAR_L,CHAR_O,SPACE,CHAR_E,CHAR_C,CHAR_E,DASH,CHAR_3,CHAR_3,CHAR_0,CHAR_L,
-SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE,SPACE};
+char Message[35];
 
 /* Declare array for Song */
-Music Song[100];
+Music Song[5];
 /* USER CODE END 0 */
 
 /**
@@ -182,9 +180,33 @@ int main(void)
   /* Initialize the first index*/
   Song[0].note = A4;
   Song[0].size = quarter;
-  Song[0].tempo = 1400;
-  Song[0].space = 10;
+  Song[0].tempo = 2400;
+  Song[0].space = 100;
   Song[0].end = 0;
+
+  Song[1].note = C4;
+  Song[1].size = quarter;
+  Song[1].tempo = 2400;
+  Song[1].space = 100;
+  Song[1].end = 0;
+
+  Song[2].note = A4;
+  Song[2].size = quarter;
+  Song[2].tempo = 2400;
+  Song[2].space = 100;
+  Song[2].end = 0;
+
+  Song[3].note = C4;
+  Song[3].size = quarter;
+  Song[3].tempo = 2400;
+  Song[3].space = 100;
+  Song[3].end = 0;
+
+  Song[4].note = A4;
+  Song[4].size = quarter;
+  Song[4].tempo = 2400;
+  Song[4].space = 100;
+  Song[4].end = 0;
 
   Save_Note = Song[0].note;  // Needed for vibrato effect
   INDEX = 0;
@@ -202,24 +224,147 @@ int main(void)
 
   while (1)
   {
-	  if(toggleDateTime == 0)
-		  Seven_Segment(time_format(RTC->TR)); // test if clock is working, second value should be ticking up
-	  if(toggleDateTime == 1){
+	  //Clock Set Time Mode
+	  if(toggleMode == 1){
+		  RCC->CR &= ~(0b1 << 8);//Allows write access
+		  RCC->BDCR &= ~(0b1 << 15);//Disables clock
+		  Seven_Segment(time_format(set_time));
+		  GPIOD->ODR = 0x1 << display_index; //Tells what number is being edited
+		  //Filtering invalid values for time
+		  if(!((GPIOC->IDR & 0xF) > 9)){
+		  	  set_time &= ~(0xF << (display_index * 4));
+			  set_time |= (GPIOC->IDR & 0xF) << (display_index * 4);//Reads the first four switches to set the time
+		  }
 
-		  Seven_Segment(date_format(RTC->DR, i));
-		  if(logTime < RTC->TR) {
-			  i = (i+1) % 4;
-			  logTime = RTC->TR;
+		  //PC11 Button Changes index
+		  if(!(GPIOC->IDR & (1 << 11))){
+			  (display_index == 5) ? (display_index = 0) : (display_index++);//Increments the display index
+			  HAL_Delay(20);
+		  	  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
+		  }
+
+	  //Clock Set Date Mode
+	  } else if(toggleMode == 2){
+		  RCC->CR &= ~(0b1 << 8);//Allows write access
+		  RCC->BDCR &= ~(0b1 << 15);//Disables clock
+		  date_message_gen(set_date);
+		  Animate_On = 2;
+
+		  GPIOD->ODR = 0x1 << display_index; //Tells what number is being edited
+
+		  if(!((GPIOC->IDR & 0xF) > 9)){
+			  switch(display_index){
+				  case 0://Day One's
+					  set_date &= ~0xF;
+					  set_date |= (GPIOC->IDR & 0xF);
+					  break;
+				  case 1://Day Ten's
+					  set_date &= ~0x30;
+					  set_date |= (GPIOC->IDR & 0x3) << 4;
+					  break;
+				  case 2://Month One's
+					  set_date &= ~0xF00;
+					  set_date |= (GPIOC->IDR & 0xF) << 8;
+					  break;
+				  case 3://Month Ten's
+					  set_date &= ~0x1000;
+					  set_date |= (GPIOC->IDR & 0x1) << 12;
+					  break;
+				  case 4://Weekday
+					  set_date &= ~0xE000;
+					  set_date |= (GPIOC->IDR & 0x7) << 13;
+					  break;
+				  case 5://Year One's
+					  set_date &= ~0xF0000;
+					  set_date |= (GPIOC->IDR & 0xF) << 16;
+					  break;
+				  case 6://Year Ten's
+					  set_date &= ~0xF00000;
+					  set_date |= (GPIOC->IDR & 0xF) << 20;
+					  break;
+			  }
+		  }
+
+		  //PC11 Button changes index
+		  if(!(GPIOC->IDR & (1 << 11))){
+			  (display_index == 6) ? (display_index = 0) : (display_index++);//Increments the display index
+			  if(display_index >= 4){
+				  Message_Pointer = &Message[17];
+			  } else {
+				  Message_Pointer = &Message[12];
+			  }
+			  HAL_Delay(20);
+			  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
 		  }
 
 
+	  //Clock Set Alarm Mode
+	  } else if(toggleMode == 3){
+		  RCC->CR &= ~(0b1 << 8);//Allows write access
+		  RCC->BDCR &= ~(0b1 << 15);//Disables clock
+		  Seven_Segment(time_format(set_time));
+		  GPIOD->ODR = 0x1 << display_index; //Tells what number is being edited
+		  //Filtering invalid values for time
+		  if(!((GPIOC->IDR & 0xF) > 9)){
+		  	  set_time &= ~(0xF << (display_index * 4));
+			  set_time |= (GPIOC->IDR & 0xF) << (display_index * 4);//Reads the first four switches to set the time
+		  }
+
+		  //PC11 Button Changes index
+		  if(!(GPIOC->IDR & (1 << 11))){
+			  (display_index == 5) ? (display_index = 0) : (display_index++);//Increments the display index
+			  HAL_Delay(20);
+		  	  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
+		  }
+
+	  //Clock Display Time & Date Mode
+	  } else {
+		  GPIOD->ODR = 0;
+		  RCC->BDCR |= (0b1 << 15);//Makes sure the clock is active
+		  RCC->CR |= (0b1 << 8);//Disables write access
+
+		  //Displaying time
+		  if(toggleDateTime == 0){
+	 		  Seven_Segment(time_format(RTC->TR)); //Sends the clock data to the time register
+	 	  	  Animate_On = 0; //Makes sure the time isn't a scrolling message
+
+	 	  //Displaying Date
+		  } else if(toggleDateTime == 1){
+			  date_message_gen(RTC->DR); //Puts the date into the Message array to display
+			  Animate_On = 1; //Activates the scrolling message
+	  	  }
+		  //In this mode PC11 toggles the date and time
+		  if(!(GPIOC->IDR & (1 << 11))){
+			  (toggleDateTime == 0) ? (toggleDateTime = 1) : (toggleDateTime = 0); // toggles the bit to display date or time
+		  	  HAL_Delay(15);
+		  	  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
+		  }
 	  }
-	  if(!(GPIOC->IDR & (1 << 11)))
-	  {
-		  (toggleDateTime == 0) ? (toggleDateTime = 1) : (toggleDateTime = 0); // toggles the bit to display date or time
+	  //PC11 Button toggles the clock mode
+	  if(!(GPIOC->IDR & (1 <<10 ))){
+		  if(toggleMode == 1){
+			  RTC_Set_Time(set_time);
+		  } else {
+			  set_time = RTC->TR; //log the time
+		  }
+		  if(toggleMode == 2){
+			  RTC_Set_Date(set_date);
+		  } else {
+			  set_date = RTC->DR; //log the time
+			  Message_Pointer = &Message[12];
+ 		  }
+		  (toggleMode == 2) ? (toggleMode = 0) : (toggleMode++);//Increments the mode
+		  display_index = 0; //reset display index
 		  HAL_Delay(15);
-		  while(!(GPIOC->IDR & (1 << 11)));//Wait for button release
+		  while(!(GPIOC->IDR & (1 << 10)));//Wait for button release
 	  }
+
+	  //Checks switch 15 to enable alarm
+	 if((GPIOC->IDR & (0b1 << 15)) == 0b1 << 15){
+		 RTC->CR &= RTC_CR_ALRAE; //Enable Alarm
+	 } else {
+		 RTC->CR &= ~RTC_CR_ALRAE; //Disable alarm
+	 }
 
 
     /* USER CODE BEGIN 3 */
@@ -229,84 +374,140 @@ int main(void)
 
 uint32_t time_format(uint32_t x)
 {
-	uint32_t temp = x & 0xFF; //Seconds
-	temp |= (x & 0xFF << 8) << 4; //Minutes
-	temp |= (x & 0xFF << 16) << 8; //Hours
-	return temp;
+	uint32_t time = x & 0xFF; //Seconds
+	time |= 0xA << 8;
+	time |= (x & 0xFF << 8) << 4; //Minutes
+	time |= 0xA << 20;
+	time |= (x & 0xFF << 16) << 8; //Hours
+	return time;
 }
 
-uint32_t date_format(uint32_t x, int index){
-	uint32_t temp = (x & 0x3F) >> index * 4; //Day
-		temp |= ((x & 0x1F << 8) << 4) >> index * 4; //Month
-		temp |= ((x & 0xE0 << 8) << 12) >> index * 4; //Weekday
-		temp |= (((0x20 << 24) + (x & 0xFF << 16)) << 12) >> index * 4; //Year in the form 20XX
-		return temp;
+void date_message_gen(uint32_t x){
+	Message[0] = SPACE;
+	Message[1] = SPACE;
+	Message[2] = SPACE;
+	Message[3] = SPACE;
+	Message[4] = SPACE;
+	Message[5] = SPACE;
+	Message[6] = SPACE;
+	Message[7] = SPACE;
+	Message[8] = SPACE;
+	Message[9] = SPACE;
+	Message[10] = SPACE;
+	Message[11] = SPACE;
+
+	Message[13] = (x & 0x3); //Day one's position
+	Message[12] = (x & 0x30) >> 4; //Day ten's position
+	Message[14] = SPACE;
+	Message[16] = (x & (0xF << 8)) >> 8;//Month one's position
+	Message[15] = (x & (0x1 << 12)) >> 12;//Month ten's position
+	Message[17] = SPACE;
+	Message[18] = (x & (0x7 << 13)) >> 13;//Weekday
+	Message[19] = SPACE;
+	Message[23] = (x & (0xF << 16)) >> 16;//Year one's position
+	Message[22] = (x & (0xF << 20)) >> 20;//Year ten's position
+	Message[21] = 0;
+	Message[20] = 2;
+
+	Message[24] = SPACE;
+	Message[25] = SPACE;
+	Message[26] = SPACE;
+	Message[27] = SPACE;
+	Message[28] = SPACE;
+	Message[29] = SPACE;
+	Message[30] = SPACE;
+	Message[31] = SPACE;
+	Message[32] = SPACE;
+	Message[33] = SPACE;
+	Message[34] = SPACE;
+	Message[35] = SPACE;
 }
+
 
 /*Initialize the RTC Clock*/
 void MX_RTC_Init(void)
 {
 	PWR->CR |= (0b1 << 8); // enable real time clock (RTC) register access
+	RTC->WPR = 0xCA;
+	RTC->WPR = 0x53;//Enabling write access
+	RTC->ISR |= RTC_ISR_INIT;
 
 	RCC->BDCR &= ~(0b11 << 8); // clear bits 9:8
 	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
 
 	RCC->BDCR |= (0b1 << 15); // enable RTC
 
+	while (!(RTC->ISR & RTC_ISR_INITF));
+
 	RTC->PRER = 0x102; // set lower portion to 258
 	RTC->PRER |= 0x007F0000; // set upper portion to 127
 
 	RTC->CR &= ~RTC_CR_FMT; // set to 24-hr clock
+
+	RTC->ISR &= ~RTC_ISR_INIT;
 }
 
 /*Sets the date off a given date*/
-void RTC_Set_Date(uint8_t year, uint8_t month, uint8_t day, uint8_t weekday)
+void RTC_Set_Date(uint32_t new_date)
 {
+	RTC->WPR = 0xCA;
+	RTC->WPR = 0x53;//Enabling write access
 	RTC->ISR |= RTC_ISR_INIT; //Enter initialization mode
+
+	RCC->BDCR &= ~(0b11 << 8); // clear bits 9:8
+	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
+
+	RCC->BDCR |= (0b1 << 15); // enable RTC
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
 
-	RTC->DR |= year << 16; // set value for year
-	RTC->DR |= month << 8; // set value for month
-	RTC->DR |= day; // set value for day
-	RTC->DR |= weekday << 13; // set value for weekday
+	RTC->PRER = 0x102; // set lower portion to 258
+	RTC->PRER |= 0x007F0000; // set upper portion to 127
+
+	RTC->DR |= new_date;
+	RTC->CR &= ~RTC_CR_FMT; // set to 24-hr clock
 
 	RTC->ISR ^= RTC_ISR_INIT; //Exit initialization mode
 }
 
 
-void RTC_Set_Time(uint8_t hour, uint8_t min, uint8_t sec)
+void RTC_Set_Time(uint32_t new_time)
 {
+	PWR->CR |= (0b1 << 8); // enable real time clock (RTC) register access
+	RTC->WPR = 0xCA;
+	RTC->WPR = 0x53;//Enabling write access
 	RTC->ISR |= RTC_ISR_INIT;
+
+	RCC->BDCR &= ~(0b11 << 8); // clear bits 9:8
+	RCC->BDCR |= (0b10 << 8); //select LSI oscillator clock as 10
+
+	RCC->BDCR |= (0b1 << 15); // enable RTC
 
 	while (!(RTC->ISR & RTC_ISR_INITF));
 
-	RTC->TR |= hour << 16; // set time for hour
-	RTC->TR |= min << 8; // set time for min
-	RTC->TR |= sec; // set time for sec
+	RTC->PRER = 0x102; // set lower portion to 258
+	RTC->PRER |= 0x007F0000; // set upper portion to 127
 
-	RTC->ISR |= ~RTC_ISR_INIT;
+	RTC->TR = new_time;
+	RTC->CR &= ~RTC_CR_FMT; // set to 24-hr clock
+
+	RTC->ISR &= ~RTC_ISR_INIT;
 }
 
-void RTC_Set_Alarm(uint8_t hour, uint8_t min, uint8_t sec)
+void RTC_Set_Alarm(void)
 {
+
+	RTC->WPR = 0xCA;
+	RTC->WPR = 0x53;//Enabling write access
+	RTC->ISR |= RTC_ISR_INIT; // Put the clock into initialization mode
 	RTC->CR &= ~RTC_CR_ALRAE; // clears ALRAE to disable alarm A
 
 	while (!(RTC->ISR & RTC_ISR_ALRAWF));
 
-//masking for time
-	uint32_t alarm = 0;
-	alarm |= (hour << 16); // hour
-	alarm |= (min << 8); // min
-	alarm |= sec; // sec
-
 	RTC->ALRMAR = alarm;
-	Seven_Segment(alarm);
-	HAL_Delay(500);
 
 	RTC->CR |= (1<< 12); // enable alarm interrupt (ALRAIE)
-	RTC->CR |= (1<< 8); // enable alarm A (ALRAE)
-	RTC->ISR &= ~(1 << 8); // clear alarm A flag
+	RTC->CR |= RTC_CR_ALRAE; // enable alarm A (ALRAE)
 }
 
 void Systik_Handler(void)

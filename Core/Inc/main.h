@@ -54,7 +54,7 @@ extern char DIM_Enable;
 extern int TONE;
 extern int COUNT;
 extern int INDEX;
-extern Music Song[100];
+extern Music Song[5];
 extern int Note;
 extern int Save_Note;
 extern int Vibrato_Depth;
