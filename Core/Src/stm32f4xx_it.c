@@ -46,6 +46,7 @@
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
+extern void Seven_Segment(unsigned int HexValue);
 
 /* USER CODE END PFP */
 
@@ -187,6 +188,13 @@ void SysTick_Handler(void)
   /* USER CODE BEGIN SysTick_IRQn 0 */
 
  /* RTC Alarm Logic */
+	if((RTC->ISR & (1 << 8)) >> 8 == 1){
+		if((RTC->CR & RTC_CR_ALRAE) == RTC_CR_ALRAE){
+			INDEX = 0; //reset song if needed
+			Music_ON = 1; // start music
+		}
+		RTC->ISR &= ~(1 << 8); // clear alarm A flag
+	}
 
 
 COUNT++;  // Increment note duration counter
@@ -207,20 +215,34 @@ if (Vibrato_Count >= Vibrato_Rate)
 if (Animate_On > 0)
 {
 	Delay_counter++;
-	if (Delay_counter > Delay_msec)
-	{
-		Delay_counter = 0;
-		Seven_Segment_Digit(7,*(Message_Pointer),0);
-		Seven_Segment_Digit(6,*(Message_Pointer+1),0);
-		Seven_Segment_Digit(5,*(Message_Pointer+2),0);
-		Seven_Segment_Digit(4,*(Message_Pointer+3),0);
-		Seven_Segment_Digit(3,*(Message_Pointer+4),0);
-		Seven_Segment_Digit(2,*(Message_Pointer+5),0);
-		Seven_Segment_Digit(1,*(Message_Pointer+6),0);
-		Seven_Segment_Digit(0,*(Message_Pointer+7),0);
-		Message_Pointer++;
-		if ((Message_Pointer - Save_Pointer) >= (Message_Length-8)) Message_Pointer = Save_Pointer;
-
+	if(Animate_On == 1){
+		if (Delay_counter > Delay_msec)
+		{
+			Delay_counter = 0;
+			Seven_Segment_Digit(7,*(Message_Pointer),0);
+			Seven_Segment_Digit(6,*(Message_Pointer+1),0);
+			Seven_Segment_Digit(5,*(Message_Pointer+2),0);
+			Seven_Segment_Digit(4,*(Message_Pointer+3),0);
+			Seven_Segment_Digit(3,*(Message_Pointer+4),0);
+			Seven_Segment_Digit(2,*(Message_Pointer+5),0);
+			Seven_Segment_Digit(1,*(Message_Pointer+6),0);
+			Seven_Segment_Digit(0,*(Message_Pointer+7),0);
+			Message_Pointer++;
+			if ((Message_Pointer - Save_Pointer) >= (Message_Length-8)) Message_Pointer = Save_Pointer;
+		}
+	} else {
+		if (Delay_counter > Delay_msec)
+		{
+			Delay_counter = 0;
+			Seven_Segment_Digit(7,*(Message_Pointer),0);
+			Seven_Segment_Digit(6,*(Message_Pointer+1),0);
+			Seven_Segment_Digit(5,*(Message_Pointer+2),0);
+			Seven_Segment_Digit(4,*(Message_Pointer+3),0);
+			Seven_Segment_Digit(3,*(Message_Pointer+4),0);
+			Seven_Segment_Digit(2,*(Message_Pointer+5),0);
+			Seven_Segment_Digit(1,*(Message_Pointer+6),0);
+			Seven_Segment_Digit(0,*(Message_Pointer+7),0);
+		}
 	}
 }
   /* USER CODE END SysTick_IRQn 0 */
